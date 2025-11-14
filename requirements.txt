@@ -1,0 +1,12 @@
+# Core dependencies for Release Notes Builder
+
+# Pydantic AI for agent framework with OpenAI support and MCP
+pydantic-ai[openai,logfire]>=1.17.0
+
+# Date parsing utilities
+python-dateutil>=2.9.0
+
+# Pydantic for data validation (included with pydantic-ai, but explicit)
+pydantic>=2.12.4
+
+# Note: httpx and other MCP dependencies are included with pydantic-ai
