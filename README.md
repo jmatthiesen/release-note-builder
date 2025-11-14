@@ -1,14 +1,15 @@
 # Release Note Builder
 
-A simple Python console application that generates user-friendly release notes from GitHub issues using AI.
+Creating release notes can be tedious. You need to review every closed issue, summarize features and bug fixes, and ensure consistent formatting—especially challenging when multiple team members contribute.
 
-## Features
+This repository demonstrates how AI can streamline this process by automatically:
 
-- Fetches closed GitHub issues within a specified date range
-- Uses AI (Claude) to summarize changes in user-benefit focused language
-- Categorizes updates into Features and Bug Fixes sections
-- Outputs clean, professional Markdown with links to original issues
-- Single-file implementation for simplicity
+* Finding all closed issues for a release (within a date range for now)
+* Generating clear, consistent release notes
+* Creating an at-a-glance summary of new features and fixes
+* Writing a clean, professional Markdown file with links to original issues
+
+The result: professional release notes that help users quickly understand what's new, without the manual effort.
 
 ## Requirements
 
@@ -64,8 +65,8 @@ python release_notes.py <owner> <repo> <start_date> <end_date>
 ### Examples
 
 ```bash
-# Generate release notes for React repository
-python release_notes.py facebook react 2024-01-01 2024-01-31
+# Generate release notes for the csharp-ai-buddy-site project
+python release_notes.py jmatthiesen csharp-ai-buddy-site 2025-09-01 2025-10-31
 
 # Generate release notes for a smaller repo
 python release_notes.py octocat Hello-World 2024-06-01 2024-06-30
@@ -76,19 +77,20 @@ python release_notes.py octocat Hello-World 2024-06-01 2024-06-30
 The tool generates Markdown output with the following structure:
 
 ```markdown
-# Release Notes: owner/repo
+**Period:** 2025-05-01 to 2025-11-01
 
-**Period:** 2024-01-01 to 2024-01-31
+## Theme Summary
 
-## Features
+- [Chat Experience](#chat-experience): Made chatting more controllable, personalized, and easy to give feedback so you get better answers faster. (5 items)
+- [Content Discovery](#content-discovery): Made it easier to find the latest news and relevant samples, starting from an improved home page. (4 items)
+...
 
-- Added dark mode support for better visibility in low-light environments ([#123](https://github.com/...))
-- Improved performance when loading large datasets ([#145](https://github.com/...))
+## Chat Experience
 
-## Bug Fixes
+Made chatting more controllable, personalized, and easy to give feedback so you get better answers faster.
 
-- Fixed authentication errors that prevented users from logging in ([#134](https://github.com/...))
-- Resolved display issues on mobile devices ([#142](https://github.com/...))
+- Added a Stop button to cancel a streaming AI response and regain control instantly. ([#7](https://github.com/jmatthiesen/csharp-ai-buddy-site/issues/7))
+...
 ```
 
 ## Design Principles
