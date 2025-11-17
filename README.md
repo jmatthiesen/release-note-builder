@@ -4,7 +4,8 @@ A simple Python console application that generates user-friendly release notes f
 
 ## Features
 
-- Fetches closed GitHub issues within a specified date range
+- Fetches closed GitHub issues within a specified date range or milestone
+- Interactive milestone selection if no filter is specified
 - Uses AI (Claude) to summarize changes in user-benefit focused language
 - Categorizes updates into Features and Bug Fixes sections
 - Outputs clean, professional Markdown with links to original issues
@@ -50,35 +51,82 @@ The application will automatically load these variables from the `.env` file whe
 
 ## Usage
 
+### Using Date Range
+
 ```bash
-python release_notes.py <owner> <repo> <start_date> <end_date>
+python release_notes.py <owner> <repo> --start-date <start_date> --end-date <end_date>
 ```
+
+### Using Milestone
+
+```bash
+python release_notes.py <owner> <repo> --milestone <milestone>
+```
+
+### Interactive Milestone Selection
+
+```bash
+python release_notes.py <owner> <repo>
+```
+
+If no date range or milestone is specified, the tool will fetch all available milestones from the repository and prompt you to select one.
 
 ### Parameters
 
 - `owner`: GitHub repository owner (user or organization)
 - `repo`: Repository name
-- `start_date`: Start of date range (ISO format: YYYY-MM-DD)
-- `end_date`: End of date range (ISO format: YYYY-MM-DD)
+- `--start-date`: Start of date range (ISO format: YYYY-MM-DD)
+- `--end-date`: End of date range (ISO format: YYYY-MM-DD)
+- `--milestone`: Milestone name or number
+- `--editor`: Enable editor review (default)
+- `--no-editor`: Skip editor review for faster generation
+
+**Note:** You must specify either `--milestone` OR both `--start-date` and `--end-date`, but not both.
 
 ### Examples
 
 ```bash
-# Generate release notes for React repository
-python release_notes.py facebook react 2024-01-01 2024-01-31
+# Generate release notes using a date range
+python release_notes.py facebook react --start-date 2024-01-01 --end-date 2024-01-31
 
-# Generate release notes for a smaller repo
-python release_notes.py octocat Hello-World 2024-06-01 2024-06-30
+# Generate release notes for a specific milestone
+python release_notes.py facebook react --milestone "v18.0.0"
+
+# Interactive mode - select from available milestones
+python release_notes.py facebook react
+
+# Skip editor review for faster generation
+python release_notes.py facebook react --milestone "v18.0.0" --no-editor
 ```
 
 ## Output Format
 
 The tool generates Markdown output with the following structure:
 
+### Using Date Range
+
 ```markdown
 # Release Notes: owner/repo
 
 **Period:** 2024-01-01 to 2024-01-31
+
+## Features
+
+- Added dark mode support for better visibility in low-light environments ([#123](https://github.com/...))
+- Improved performance when loading large datasets ([#145](https://github.com/...))
+
+## Bug Fixes
+
+- Fixed authentication errors that prevented users from logging in ([#134](https://github.com/...))
+- Resolved display issues on mobile devices ([#142](https://github.com/...))
+```
+
+### Using Milestone
+
+```markdown
+# Release Notes: owner/repo
+
+**Milestone:** v1.0.0
 
 ## Features
 
@@ -160,7 +208,6 @@ This project is licensed under the MIT License - feel free to modify and use as 
 ## Future Enhancements
 
 Potential improvements for production use:
-- Specify a milestone to use, instead of date range
 - Support for multiple repositories in one run
 - Custom categorization rules (e.g., by label)
 - Template customization (different output formats)

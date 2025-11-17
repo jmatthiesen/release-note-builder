@@ -3,20 +3,34 @@
 Release Note Builder - Generate user-friendly release notes from GitHub issues
 
 This tool uses the GitHub MCP server and Pydantic AI to fetch closed issues
-within a date range and creates a summarized markdown document with features
+within a date range or milestone and creates a summarized markdown document with features
 and bug fixes. It includes an optional editor agent that reviews and refines
 the generated output for clarity, consistency, and alignment with best practices.
 
 Usage:
-    python release_notes.py <owner> <repo> <start_date> <end_date> [--editor|--no-editor]
+    # Using date range
+    python release_notes.py <owner> <repo> --start-date <start_date> --end-date <end_date> [--editor|--no-editor]
 
-    Example:
-    python release_notes.py facebook react 2024-01-01 2024-01-31
-    python release_notes.py facebook react 2024-01-01 2024-01-31 --no-editor
+    # Using milestone
+    python release_notes.py <owner> <repo> --milestone <milestone> [--editor|--no-editor]
+
+    # Interactive milestone selection
+    python release_notes.py <owner> <repo> [--editor|--no-editor]
+
+    Examples:
+    python release_notes.py facebook react --start-date 2024-01-01 --end-date 2024-01-31
+    python release_notes.py facebook react --milestone "v1.0.0"
+    python release_notes.py facebook react --no-editor
 
 Options:
+    --start-date  Start of date range (ISO format: YYYY-MM-DD)
+    --end-date    End of date range (ISO format: YYYY-MM-DD)
+    --milestone   Milestone name or number
     --editor      Enable editor review (default)
     --no-editor   Skip editor review for faster generation
+
+Note: You must specify either --milestone OR both --start-date and --end-date, but not both.
+      If neither is specified, you'll be prompted to select from available milestones.
 
 Requirements:
     - GITHUB_TOKEN environment variable (create at https://github.com/settings/tokens)
@@ -28,7 +42,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from dateutil import parser as date_parser
 from pydantic import BaseModel, Field
@@ -184,10 +198,66 @@ Output the refined markdown that maintains accuracy while significantly improvin
 """
 
 
+async def fetch_milestones(owner: str, repo: str) -> list[str]:
+    """Fetch available milestone titles from the repository."""
+
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        raise ValueError(
+            "GITHUB_TOKEN environment variable is required. "
+            "Get a token at https://github.com/settings/tokens"
+        )
+
+    print(f"Fetching milestones from {owner}/{repo}...")
+
+    github_mcp = MCPServerStreamableHTTP(
+        url="https://api.githubcopilot.com/mcp/",
+        headers={
+            "Authorization": f"Bearer {github_token}",
+            "X-MCP-Toolsets": "issues,pull_requests",
+            "X-MCP-Readonly": "true"
+        },
+    )
+
+    # Create a simple agent to fetch milestones
+    agent = Agent(
+        model="openai:gpt-4o",  # Using faster model for simple fetch
+        system_prompt="You are a helper that retrieves GitHub milestone information.",
+        toolsets=[github_mcp],
+    )
+
+    prompt = f"""Using the GitHub MCP server tools, retrieve all milestones from the repository {owner}/{repo}.
+
+Return only the milestone titles as a simple list of strings, one per line.
+Include both open and closed milestones.
+Do not include any other text or formatting."""
+
+    try:
+        result = await agent.run(prompt)
+        milestones_text = str(result.output).strip()
+
+        if not milestones_text:
+            return []
+
+        # Parse the milestone titles from the response
+        milestones = [line.strip() for line in milestones_text.split('\n') if line.strip()]
+        return milestones
+    except Exception as e:
+        raise ValueError(f"Failed to fetch milestones: {e}")
+
+
 async def generate_release_notes(
-    owner: str, repo: str, start_date: datetime, end_date: datetime
+    owner: str, repo: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, milestone: Optional[str] = None
 ) -> str:
-    """Generate release notes for the given repository and date range using GitHub MCP server."""
+    """Generate release notes for the given repository using either date range or milestone.
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        start_date: Start of date range (required if milestone not provided)
+        end_date: End of date range (required if milestone not provided)
+        milestone: Milestone name (required if dates not provided)
+    """
 
     # Check for required environment variables
     github_token = os.getenv("GITHUB_TOKEN")
@@ -207,6 +277,13 @@ async def generate_release_notes(
     if not owner or not repo:
         raise ValueError("Repository owner and name cannot be empty")
 
+    # Validate that either milestone or date range is provided
+    if milestone and (start_date or end_date):
+        raise ValueError("Cannot specify both milestone and date range")
+
+    if not milestone and not (start_date and end_date):
+        raise ValueError("Must specify either milestone or both start_date and end_date")
+
     print(f"Connecting to GitHub MCP server...")
 
     # Configure GitHub MCP server (remote hosted version)
@@ -220,7 +297,13 @@ async def generate_release_notes(
     )
 
     print(f"Fetching closed issues from {owner}/{repo}...")
-    print(f"Date range: {start_date.date()} to {end_date.date()}")
+
+    if milestone:
+        print(f"Milestone: {milestone}")
+        filter_description = f"milestone '{milestone}'"
+    else:
+        print(f"Date range: {start_date.date()} to {end_date.date()}")
+        filter_description = f"date range {start_date.date()} to {end_date.date()}"
 
     # Create the agent with GitHub MCP server
     agent = Agent(
@@ -231,7 +314,24 @@ async def generate_release_notes(
     )
 
     # Construct the prompt for the agent
-    prompt = f"""Using the GitHub MCP server tools, retrieve all closed issues from the repository {owner}/{repo} that were closed between {start_date.date()} and {end_date.date()}.
+    if milestone:
+        search_criteria = f"""Search criteria:
+- Repository: {owner}/{repo}
+- Milestone: {milestone}
+- State: closed
+- Type: issues only (not pull requests)"""
+
+        prompt_intro = f"""Using the GitHub MCP server tools, retrieve all closed issues from the repository {owner}/{repo} that are associated with the milestone "{milestone}"."""
+    else:
+        search_criteria = f"""Search criteria:
+- Repository: {owner}/{repo}
+- State: closed
+- Closed date: between {start_date.isoformat()} and {end_date.isoformat()}
+- Type: issues only (not pull requests)"""
+
+        prompt_intro = f"""Using the GitHub MCP server tools, retrieve all closed issues from the repository {owner}/{repo} that were closed between {start_date.date()} and {end_date.date()}."""
+
+    prompt = f"""{prompt_intro}
 
 For each closed issue found:
 1. Exclude any pull requests - only include actual issues
@@ -248,11 +348,7 @@ After analyzing all issues, infer broader THEMES that group related issues by us
 
 If no meaningful themes emerge, leave the theme list empty and ensure issues are still included in the appropriate feature or bug fix lists.
 
-Search criteria:
-- Repository: {owner}/{repo}
-- State: closed
-- Closed date: between {start_date.isoformat()} and {end_date.isoformat()}
-- Type: issues only (not pull requests)
+{search_criteria}
 
 Return a ReleaseNotes object containing theme_groups plus feature and bug lists for fallback."""
 
@@ -271,10 +367,20 @@ Return a ReleaseNotes object containing theme_groups plus feature and bug lists 
         and not release_notes.features
         and not release_notes.bug_fixes
     ):
-        return f"No closed issues found between {start_date.date()} and {end_date.date()}"
+        if milestone:
+            return f"No closed issues found for milestone '{milestone}'"
+        else:
+            return f"No closed issues found between {start_date.date()} and {end_date.date()}"
 
     # Format as markdown
-    markdown = f"""# Release Notes: {owner}/{repo}
+    if milestone:
+        markdown = f"""# Release Notes: {owner}/{repo}
+
+**Milestone:** {milestone}
+
+"""
+    else:
+        markdown = f"""# Release Notes: {owner}/{repo}
 
 **Period:** {start_date.date()} to {end_date.date()}
 
@@ -391,14 +497,24 @@ def parse_date(date_str: str) -> datetime:
 
 async def main():
     """Main entry point for the CLI."""
-    if len(sys.argv) < 5 or len(sys.argv) > 6:
-        print("Usage: python release_notes.py <owner> <repo> <start_date> <end_date> [--editor|--no-editor]")
-        print("\nExample:")
-        print("  python release_notes.py facebook react 2024-01-01 2024-01-31")
-        print("  python release_notes.py facebook react 2024-01-01 2024-01-31 --editor")
+    # Parse command line arguments
+    if len(sys.argv) < 3:
+        print("Usage:")
+        print("  python release_notes.py <owner> <repo> --start-date <date> --end-date <date> [--editor|--no-editor]")
+        print("  python release_notes.py <owner> <repo> --milestone <milestone> [--editor|--no-editor]")
+        print("  python release_notes.py <owner> <repo> [--editor|--no-editor]")
+        print("\nExamples:")
+        print("  python release_notes.py facebook react --start-date 2024-01-01 --end-date 2024-01-31")
+        print("  python release_notes.py facebook react --milestone \"v1.0.0\"")
+        print("  python release_notes.py facebook react --no-editor")
         print("\nOptions:")
+        print("  --start-date  Start of date range (ISO format: YYYY-MM-DD)")
+        print("  --end-date    End of date range (ISO format: YYYY-MM-DD)")
+        print("  --milestone   Milestone name or number")
         print("  --editor      Enable editor review (default)")
         print("  --no-editor   Skip editor review")
+        print("\nNote: Specify either --milestone OR both --start-date and --end-date.")
+        print("      If neither is specified, you'll be prompted to select a milestone.")
         print("\nEnvironment variables required:")
         print("  - GITHUB_TOKEN: Your GitHub Personal Access Token")
         print("  - OPENAI_API_KEY: Your OpenAI API key")
@@ -406,34 +522,111 @@ async def main():
 
     owner = sys.argv[1]
     repo = sys.argv[2]
-    start_date_str = sys.argv[3]
-    end_date_str = sys.argv[4]
 
-    # Parse editor flag (default to True)
+    # Parse named arguments
+    start_date_str = None
+    end_date_str = None
+    milestone = None
     use_editor = True
-    if len(sys.argv) == 6:
-        flag = sys.argv[5].lower()
-        if flag == "--no-editor":
-            use_editor = False
-        elif flag == "--editor":
+
+    i = 3
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == "--start-date":
+            if i + 1 >= len(sys.argv):
+                print("Error: --start-date requires a value")
+                sys.exit(1)
+            start_date_str = sys.argv[i + 1]
+            i += 2
+        elif arg == "--end-date":
+            if i + 1 >= len(sys.argv):
+                print("Error: --end-date requires a value")
+                sys.exit(1)
+            end_date_str = sys.argv[i + 1]
+            i += 2
+        elif arg == "--milestone":
+            if i + 1 >= len(sys.argv):
+                print("Error: --milestone requires a value")
+                sys.exit(1)
+            milestone = sys.argv[i + 1]
+            i += 2
+        elif arg == "--editor":
             use_editor = True
+            i += 1
+        elif arg == "--no-editor":
+            use_editor = False
+            i += 1
         else:
-            print(f"Error: Unknown option '{sys.argv[5]}'. Use --editor or --no-editor")
+            print(f"Error: Unknown option '{arg}'")
+            sys.exit(1)
+
+    # Validate argument combinations
+    if milestone and (start_date_str or end_date_str):
+        print("Error: Cannot specify both --milestone and date range (--start-date/--end-date)")
+        sys.exit(1)
+
+    if start_date_str and not end_date_str:
+        print("Error: --start-date requires --end-date")
+        sys.exit(1)
+
+    if end_date_str and not start_date_str:
+        print("Error: --end-date requires --start-date")
+        sys.exit(1)
+
+    # If no filter specified, prompt for milestone selection
+    if not milestone and not start_date_str:
+        try:
+            available_milestones = await fetch_milestones(owner, repo)
+
+            if not available_milestones:
+                print(f"No milestones found in {owner}/{repo}")
+                print("Please use date range instead:")
+                print(f"  python release_notes.py {owner} {repo} --start-date YYYY-MM-DD --end-date YYYY-MM-DD")
+                sys.exit(1)
+
+            print(f"\nAvailable milestones in {owner}/{repo}:")
+            for i, ms in enumerate(available_milestones, 1):
+                print(f"  {i}. {ms}")
+
+            print("\nSelect a milestone by number, or press Ctrl+C to exit:")
+            try:
+                selection = input("> ").strip()
+                selection_num = int(selection)
+
+                if selection_num < 1 or selection_num > len(available_milestones):
+                    print(f"Error: Please select a number between 1 and {len(available_milestones)}")
+                    sys.exit(1)
+
+                milestone = available_milestones[selection_num - 1]
+                print(f"Selected: {milestone}\n")
+            except (ValueError, KeyboardInterrupt):
+                print("\nCancelled")
+                sys.exit(0)
+
+        except Exception as e:
+            print(f"Error fetching milestones: {e}")
+            sys.exit(1)
+
+    # Parse dates if provided
+    start_date = None
+    end_date = None
+
+    if start_date_str and end_date_str:
+        try:
+            start_date = parse_date(start_date_str)
+            end_date = parse_date(end_date_str)
+
+            if start_date > end_date:
+                print("Error: Start date must be before end date")
+                sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}")
             sys.exit(1)
 
     try:
-        start_date = parse_date(start_date_str)
-        end_date = parse_date(end_date_str)
-    except ValueError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-
-    if start_date > end_date:
-        print("Error: Start date must be before end date")
-        sys.exit(1)
-
-    try:
-        release_notes = await generate_release_notes(owner, repo, start_date, end_date)
+        release_notes = await generate_release_notes(
+            owner, repo, start_date=start_date, end_date=end_date, milestone=milestone
+        )
 
         # Run editor review if enabled
         final_markdown = release_notes
